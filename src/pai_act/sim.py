@@ -13,9 +13,7 @@ ENV_IDS = {
 
 def make_env(task: str = "transfer_cube", max_episode_steps: int = 400) -> gym.Env:
     # gym-aloha の既定は 300 ステップ（6秒）。デモは 400 フレームなので伸ばせるようにする
-    return gym.make(
-        ENV_IDS[task], obs_type="pixels_agent_pos", max_episode_steps=max_episode_steps
-    )
+    return gym.make(ENV_IDS[task], obs_type="pixels_agent_pos", max_episode_steps=max_episode_steps)
 
 
 def reset_with_box_pose(env: gym.Env, box_pose: np.ndarray) -> dict:
