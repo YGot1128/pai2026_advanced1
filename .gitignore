@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.ruff_cache/
+.pytest_cache/
+
+# 学習成果物・データ（大きいので Git に入れない）
+outputs/
+runs/
+checkpoints/
+data/
+*.mp4
+*.pt
+*.ckpt
+
+# 公開しないもの（講座の配布資料・個人メモ）
+Physical AI応用1講座*.txt
+memo

@@ -1,0 +1,44 @@
+[project]
+name = "pai2026-act"
+version = "0.1.0"
+description = "ACT (Action Chunking Transformer) のスクラッチ実装と ALOHA シミュレーションでの評価"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # 学習・推論
+    "torch>=2.14",
+    "torchvision>=0.29",
+    # シミュレータ（借用部分）
+    "gym-aloha>=0.1.4",
+    # データセット読み出し（借用部分: ファイルI/Oのみ）
+    "huggingface-hub>=0.30",
+    "pyarrow>=18",
+    "pandas>=2.2",
+    "av>=14",
+    # ログ・可視化
+    "tensorboard>=2.18",
+    "matplotlib>=3.9",
+    "imageio[ffmpeg]>=2.34",
+    "tqdm>=4.66",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.ruff]
+line-length = 100

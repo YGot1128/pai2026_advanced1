@@ -1,0 +1,42 @@
+{
+  "name": "pai2026-act",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "runArgs": [
+    "--gpus=all",
+    "--shm-size=16g",
+    // WSL2: MuJoCo の EGL 描画を Mesa D3D12 ドライバ経由で GPU に載せる（無いと CPU の llvmpipe になり約6倍遅い）
+    "--device=/dev/dxg"
+  ],
+  "remoteUser": "vscode",
+  "mounts": [
+    "source=/usr/lib/wsl,target=/usr/lib/wsl,type=bind,readonly",
+    "source=pai2026-uv-cache,target=/home/vscode/.cache/uv,type=volume",
+    "source=pai2026-hf-cache,target=/home/vscode/.cache/huggingface,type=volume"
+  ],
+  "containerEnv": {
+    "UV_PROJECT_ENVIRONMENT": "${containerWorkspaceFolder}/.venv",
+    "LD_LIBRARY_PATH": "/usr/lib/wsl/lib",
+    "GALLIUM_DRIVER": "d3d12",
+    // 指定しないと内蔵GPU(Intel UHD)が選ばれる
+    "MESA_D3D12_DEFAULT_ADAPTER_NAME": "NVIDIA"
+  },
+  "postCreateCommand": "sudo chown vscode:vscode /home/vscode/.cache/uv /home/vscode/.cache/huggingface && uv sync",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        }
+      }
+    }
+  }
+}
