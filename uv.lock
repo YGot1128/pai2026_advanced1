@@ -1104,7 +1104,7 @@ wheels = [
 [[package]]
 name = "pai2026-act"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "av" },
     { name = "gym-aloha" },
