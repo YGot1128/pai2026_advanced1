@@ -18,7 +18,7 @@ import imageio
 import numpy as np
 
 from pai_act.data.dataset import AlohaDataset
-from pai_act.sim import make_env, reset_with_box_pose
+from pai_act.exps.sim import make_env, reset_with_box_pose
 
 CUBE_Z = 0.05
 CUBE_QUAT = [1.0, 0.0, 0.0, 0.0]

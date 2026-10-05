@@ -102,11 +102,12 @@ gym-aloha の既定のエピソード長は **300ステップ（6秒）** です
 │   │   ├── act.py             # CVAE ヘッド（ACT 原著）（予定）
 │   │   ├── diffusion.py       # DDPM ヘッド（予定）
 │   │   └── flow_matching.py   # Flow Matching ヘッド（予定）
-│   ├── inference.py           # action chunking / temporal ensembling（予定）
-│   ├── train.py               # 学習ループ（全手法で共通）（予定）
-│   ├── evaluate.py            # ロールアウト・成功率・動画保存（全手法で共通）（予定）
-│   ├── config.py              # ハイパーパラメータ（予定）
-│   └── sim.py                 # gym-aloha の薄いラッパ【借用: 物理シム】
+│   └── exps/                  # 実験の実行に関わるもの
+│       ├── sim.py             # gym-aloha の薄いラッパ【借用: 物理シム】
+│       ├── inference.py       # action chunking / temporal ensembling（予定）
+│       ├── train.py           # 学習ループ（全手法で共通）（予定）
+│       ├── evaluate.py        # ロールアウト・成功率・動画保存（全手法で共通）（予定）
+│       └── config.py          # ハイパーパラメータ（予定）
 ├── scripts/                   # 実行の入口（処理の中身は src/pai_act に置く）
 │   ├── check_env.py           # 環境の動作確認（GPU / 描画 / 動画保存）
 │   └── replay_demo.py         # デモをシミュレータで再生して検証する
@@ -118,8 +119,8 @@ gym-aloha の既定のエピソード長は **300ステップ（6秒）** です
 
 ### 構成の考え方
 
-- **公平な比較を構造で保証する**: 画像・状態を観測トークン列にする部分（`policies/trunk.py`）を3手法で共有し、違いはヘッドだけにしています。全ポリシーが `policies/base.py` の共通インタフェースを実装するので、学習ループ（`train.py`）と評価（`evaluate.py`）は1つずつです。
-- **借用部分をファイル単位で閉じ込める**: 借用は `data/dataset.py`、`nn/backbone.py`、`sim.py` の3ファイルに限っています。上の「スクラッチ実装と借用部分の線引き」の表と対応しています。
+- **公平な比較を構造で保証する**: 画像・状態を観測トークン列にする部分（`policies/trunk.py`）を3手法で共有し、違いはヘッドだけにしています。全ポリシーが `policies/base.py` の共通インタフェースを実装するので、学習ループ（`exps/train.py`）と評価（`exps/evaluate.py`）は1つずつです。
+- **借用部分をファイル単位で閉じ込める**: 借用は `data/dataset.py`、`nn/backbone.py`、`exps/sim.py` の3ファイルに限っています。上の「スクラッチ実装と借用部分の線引き」の表と対応しています。
 - **参考にした構成**: 部品の分け方（backbone / transformer / position encoding）は [DETR](https://github.com/facebookresearch/detr) と、それを流用した [ACT 公式実装](https://github.com/tonyzhaozh/act) を参考にしました。手法ごとにポリシーを分けて共通インタフェースを持たせる形は、[LeRobot](https://github.com/huggingface/lerobot) と [Diffusion Policy](https://github.com/real-stanford/diffusion_policy) を参考にしています。参考にしたのは構成だけで、コードは自前で書いています。
 
 ## 環境構築
