@@ -6,10 +6,10 @@ __pycache__/
 .pytest_cache/
 
 # 学習成果物・データ（大きいので Git に入れない）
-outputs/
-runs/
-checkpoints/
-data/
+/outputs/
+/runs/
+/checkpoints/
+/data/
 *.mp4
 *.pt
 *.ckpt

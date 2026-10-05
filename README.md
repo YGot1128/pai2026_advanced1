@@ -81,18 +81,46 @@ gym-aloha の既定のエピソード長は **300ステップ（6秒）** です
 
 ## リポジトリ構成
 
+`（予定）` が付いたファイルはまだ作成していません。
+
 ```
 .
-├── .devcontainer/          # 開発環境（Ubuntu 24.04 + uv + MuJoCo の EGL 描画）
+├── .devcontainer/             # 開発環境（Ubuntu 24.04 + uv + MuJoCo の EGL 描画）
 ├── src/pai_act/
-│   ├── dataset.py          # LeRobot v3.0 形式データセットの読み出し
-│   └── sim.py              # gym-aloha の薄いラッパ（キューブ位置を指定してリセット）
-├── scripts/
-│   ├── check_env.py        # 環境の動作確認（GPU / 描画 / 動画保存）
-│   └── replay_demo.py      # デモをシミュレータで再生して検証する
+│   ├── data/
+│   │   ├── dataset.py         # LeRobot v3.0 形式データセットの読み出し【借用: ファイルI/O】
+│   │   ├── chunk_dataset.py   # 学習サンプルの切り出し（観測1フレーム + 行動kステップ）（予定）
+│   │   └── normalize.py       # 統計量の算出と正規化（予定）
+│   ├── nn/                    # タスクに依存しない部品
+│   │   ├── attention.py       # Multi-Head Attention（予定）
+│   │   ├── transformer.py     # Encoder / Decoder 層（予定）
+│   │   ├── position.py        # sinusoidal 位置エンコーディング（1D / 2D）（予定）
+│   │   └── backbone.py        # ResNet18 と特徴の射影【借用: 事前学習重み】（予定）
+│   ├── policies/              # 比較実験の対象
+│   │   ├── base.py            # 共通インタフェース（compute_loss / predict_chunk）（予定）
+│   │   ├── trunk.py           # 全手法で共有する部分: 画像・状態 → 観測トークン列（予定）
+│   │   ├── act.py             # CVAE ヘッド（ACT 原著）（予定）
+│   │   ├── diffusion.py       # DDPM ヘッド（予定）
+│   │   └── flow_matching.py   # Flow Matching ヘッド（予定）
+│   ├── inference.py           # action chunking / temporal ensembling（予定）
+│   ├── train.py               # 学習ループ（全手法で共通）（予定）
+│   ├── evaluate.py            # ロールアウト・成功率・動画保存（全手法で共通）（予定）
+│   ├── config.py              # ハイパーパラメータ（予定）
+│   └── sim.py                 # gym-aloha の薄いラッパ【借用: 物理シム】
+├── scripts/                   # 実行の入口（処理の中身は src/pai_act に置く）
+│   ├── check_env.py           # 環境の動作確認（GPU / 描画 / 動画保存）
+│   └── replay_demo.py         # デモをシミュレータで再生して検証する
+├── tests/                     # 自作部品の単体テスト（予定）
+├── ros2/pai_act_ros/          # ROS2 パッケージ（colcon でビルド）（予定）
 ├── pyproject.toml / uv.lock
-└── PLAN_final_project.md   # 実施計画
+└── PLAN_final_project.md      # 実施計画
 ```
+
+### 構成の考え方
+
+- **公平な比較を構造で保証する**: 画像・状態を観測トークン列にする部分（`policies/trunk.py`）を3手法で共有し、違いはヘッドだけにしています。全ポリシーが `policies/base.py` の共通インタフェースを実装するので、学習ループ（`train.py`）と評価（`evaluate.py`）は1つずつです。
+- **借用部分をファイル単位で閉じ込める**: 借用は `data/dataset.py`、`nn/backbone.py`、`sim.py` の3ファイルに限っています。上の「スクラッチ実装と借用部分の線引き」の表と対応しています。
+- **参考にした構成**: 部品の分け方（backbone / transformer / position encoding）は [DETR](https://github.com/facebookresearch/detr) と、それを流用した [ACT 公式実装](https://github.com/tonyzhaozh/act) を参考にしました。手法ごとにポリシーを分けて共通インタフェースを持たせる形は、[LeRobot](https://github.com/huggingface/lerobot) と [Diffusion Policy](https://github.com/real-stanford/diffusion_policy) を参考にしています。参考にしたのは構成だけで、コードは自前で書いています。
 
 ## 環境構築
 
