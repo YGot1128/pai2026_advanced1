@@ -7,6 +7,8 @@ dependencies = [
     # 学習・推論
     "torch>=2.14",
     "torchvision>=0.29",
+    # 学習ループ（ポリシーの中身は素の PyTorch。Lightning は学習の進行・ログ・保存だけに使う）
+    "lightning>=2.6",
     # シミュレータ（借用部分）
     "gym-aloha>=0.1.4",
     # データセット読み出し（借用部分: ファイルI/Oのみ）
@@ -19,6 +21,7 @@ dependencies = [
     "matplotlib>=3.9",
     "imageio[ffmpeg]>=2.34",
     "tqdm>=4.66",
+    "wandb>=0.30.0",
 ]
 
 [build-system]
@@ -33,6 +36,7 @@ dev = [
     "ipykernel>=6.29",
     "pytest>=8.3",
     "ruff>=0.8",
+    "ty>=0.0.85",
 ]
 
 [tool.uv]
@@ -49,3 +53,13 @@ explicit = true
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: import の並び順, B: bugbear, UP: 新しい構文への書き換え, SIM: 簡潔化
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+# 長い行は ruff format が折り返す。折り返せない日本語のコメント・docstring は対象外にする
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# exps/config.py の arg() は dataclasses.field を返すだけなので、dataclass の既定値に使ってよい
+extend-immutable-calls = ["pai_act.exps.config.arg"]

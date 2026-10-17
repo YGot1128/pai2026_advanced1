@@ -1,6 +1,12 @@
 """環境の動作確認: GPU(PyTorch) と gym-aloha の描画・動画保存が通るかを見る。
 
-使い方: uv run python scripts/check_env.py
+確認する項目（上から順に実行し、どこかで失敗したらそこで止まる）:
+    1. check_torch: PyTorch から CUDA（GPU）が使えるか
+    2. check_gl:    MuJoCo の描画（OpenGL / EGL）が GPU で動いているか
+    3. check_aloha: gym-aloha の環境を作って動かし、カメラ画像を動画ファイルに保存できるか
+
+使い方（リポジトリ直下で実行）: bash scripts/check_env.sh
+出力: outputs/check_env.mp4（ランダムな行動で 100 ステップ動かした動画）
 """
 
 import os
@@ -9,11 +15,11 @@ from pathlib import Path
 import gym_aloha  # noqa: F401  (gymnasium に環境を登録する)
 import gymnasium as gym
 import imageio
-import numpy as np
 import torch
 
 
 def check_torch() -> None:
+    """CUDA が使えることを確かめ、GPU 上で行列積を1回計算する。"""
     print(f"torch {torch.__version__} / CUDA build {torch.version.cuda}")
     assert torch.cuda.is_available(), "CUDA が使えない（--gpus=all でコンテナを起動しているか確認）"
     print(f"GPU: {torch.cuda.get_device_name(0)}")
@@ -22,6 +28,11 @@ def check_torch() -> None:
 
 
 def check_gl() -> None:
+    """MuJoCo と同じ EGL で OpenGL のコンテキストを作り、どのデバイスで描画されるかを表示する。
+
+    MUJOCO_GL=egl はディスプレイなし（ヘッドレス）で描画するための設定（devcontainer.json で指定）。
+    renderer に NVIDIA と出れば GPU 描画、llvmpipe と出れば CPU によるソフトウェア描画（遅い）。
+    """
     from mujoco.egl import GLContext
     from OpenGL import GL
 
@@ -34,6 +45,7 @@ def check_gl() -> None:
 
 
 def check_aloha(out_path: Path, steps: int = 100) -> None:
+    """gym-aloha でランダムな行動を steps 回実行し、観測の形を表示して動画を out_path に保存する。"""
     env = gym.make("gym_aloha/AlohaTransferCube-v0", obs_type="pixels_agent_pos")
     obs, _ = env.reset(seed=0)
     print(f"observation keys: {list(obs.keys())}")
@@ -49,7 +61,7 @@ def check_aloha(out_path: Path, steps: int = 100) -> None:
     env.close()
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    imageio.mimsave(out_path, np.stack(frames), fps=50)
+    imageio.mimsave(out_path, frames, fps=50)
     print(f"saved {len(frames)} frames -> {out_path}")
 
 

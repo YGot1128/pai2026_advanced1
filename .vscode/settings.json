@@ -1,0 +1,16 @@
+{
+    "remote.autoForwardPortsFallback": 0,
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports.ruff": "explicit"
+        },
+        // ruff format はコメントを折り返さないので、100 文字の位置に線を引いて目で確かめる
+        "editor.rulers": [100]
+    },
+    // 型チェックは ty（astral-sh.ty）が行う。補完・ホバーはノートブックにも対応している Pylance に任せ、
+    // 同じ情報が二重に出ないよう ty の言語機能は切り、Pylance の型チェックも切る
+    "ty.disableLanguageServices": true,
+    "python.analysis.typeCheckingMode": "off"
+}

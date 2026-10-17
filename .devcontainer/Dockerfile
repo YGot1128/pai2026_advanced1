@@ -28,3 +28,6 @@ RUN mkdir -p /opt/uv-python && chown vscode:vscode /opt/uv-python \
     && mkdir -p /home/vscode/.cache && chown vscode:vscode /home/vscode/.cache
 
 USER vscode
+
+# Python 本体をイメージに焼き込む（コンテナ再作成のたびにダウンロードしない）
+RUN uv python install 3.12
