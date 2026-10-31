@@ -7,4 +7,7 @@
     baseline.py  パイプライン検証用の仮モデル（ResNet18 + MLP）
     trunk.py     全手法で共有する部分: 特徴マップ・関節角 → 観測トークン列
     act.py       ACT（CVAE ヘッド）
+    denoiser.py  Diffusion / Flow Matching で共有するデノイザ
+    diffusion.py Diffusion ヘッド（DDPM で学習、DDPM / DDIM でサンプリング）
+    flow_matching.py  Flow Matching ヘッド（速度を学習、Euler / Heun で ODE を解く）
 """

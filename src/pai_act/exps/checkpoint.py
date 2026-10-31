@@ -18,6 +18,7 @@ from pai_act.policies.act import ACTPolicy
 from pai_act.policies.base import Policy
 from pai_act.policies.baseline import BaselinePolicy
 from pai_act.policies.diffusion import DiffusionPolicy
+from pai_act.policies.flow_matching import FlowMatchingPolicy
 
 
 def build_policy(cfg: TrainConfig, pretrained_backbone: bool = True) -> Policy:
@@ -57,6 +58,19 @@ def build_policy(cfg: TrainConfig, pretrained_backbone: bool = True) -> Policy:
             num_inference_steps=cfg.num_inference_steps,
             x0_clip=cfg.x0_clip,
             ddim_eta=cfg.ddim_eta,
+            pretrained_backbone=pretrained_backbone,
+        )
+    if cfg.policy == "flow_matching":
+        return FlowMatchingPolicy(
+            chunk_size=cfg.chunk_size,
+            d_model=cfg.d_model,
+            num_heads=cfg.num_heads,
+            dim_feedforward=cfg.dim_feedforward,
+            num_encoder_layers=cfg.num_encoder_layers,
+            num_decoder_layers=cfg.num_decoder_layers,
+            dropout=cfg.dropout,
+            solver=cfg.solver,
+            num_inference_steps=cfg.num_inference_steps,
             pretrained_backbone=pretrained_backbone,
         )
     raise ValueError(f"unknown policy: {cfg.policy}")
