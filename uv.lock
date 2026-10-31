@@ -1006,6 +1006,18 @@ wheels = [
 ]
 
 [[package]]
+name = "matplotlib-fontja"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1b/0a/6710bc330f4372287e73c7fbc61d27b9a3c93ff19d6bf1d492b3482d3e52/matplotlib_fontja-1.1.0.tar.gz", hash = "sha256:eb0ad93eea01ceac6b563bccce9959335bfd487824160712a81984142ffb8e44", size = 4164296, upload-time = "2025-04-24T13:20:27.892Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/d8/7c0487747902ced21faf4cc6f9cfd8467a845261908dbdaf9e256faa9119/matplotlib_fontja-1.1.0-py2.py3-none-any.whl", hash = "sha256:930603aaffd420ad89a6cf3399f074b14e939e8e349843ed1cb558ac97c8c94a", size = 4175561, upload-time = "2025-04-24T13:20:26.216Z" },
+]
+
+[[package]]
 name = "matplotlib-inline"
 version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1408,6 +1420,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "ipykernel" },
+    { name = "matplotlib-fontja" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "ty" },
@@ -1433,6 +1446,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "ipykernel", specifier = ">=6.29" },
+    { name = "matplotlib-fontja", specifier = ">=1.1.0" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "ruff", specifier = ">=0.8" },
     { name = "ty", specifier = ">=0.0.85" },

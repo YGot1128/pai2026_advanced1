@@ -34,6 +34,7 @@ packages = ["src/pai_act"]
 [dependency-groups]
 dev = [
     "ipykernel>=6.29",
+    "matplotlib-fontja>=1.1.0",
     "pytest>=8.3",
     "ruff>=0.8",
     "ty>=0.0.85",
