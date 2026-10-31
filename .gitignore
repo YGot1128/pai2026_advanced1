@@ -10,12 +10,19 @@ __pycache__/
 /runs/
 /checkpoints/
 /data/
+/notebooks/
 *.mp4
 *.pt
 *.ckpt
 
 # 公開しないもの（講座の配布資料・個人メモ・論文の PDF・Windows がダウンロード時に付けるメタデータ）
-Physical AI応用1講座*.txt
+*.txt
 memo
 docs/*.pdf
 *:Zone.Identifier
+/report/
+*.docx
+night_*.sh
+*_IMPLEMENTATION.md
+CODE_READING.md
+CLAUDE.md
