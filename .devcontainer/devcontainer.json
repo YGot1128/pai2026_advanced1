@@ -22,14 +22,20 @@
     // 指定しないと内蔵GPU(Intel UHD)が選ばれる
     "MESA_D3D12_DEFAULT_ADAPTER_NAME": "NVIDIA"
   },
-  "postCreateCommand": "sudo chown vscode:vscode /home/vscode/.cache/uv /home/vscode/.cache/huggingface && uv sync",
+  "remoteEnv": {
+    // ホスト側の環境変数を接続のたびに引き継ぐ（containerEnv と違い docker inspect に残らない）
+    "WANDB_API_KEY": "${localEnv:WANDB_API_KEY}"
+  },
+  "postCreateCommand": "sudo chown vscode:vscode /home/vscode/.cache/uv /home/vscode/.cache/huggingface && uv sync && git config core.hooksPath .githooks",
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
         "ms-toolsai.jupyter",
-        "charliermarsh.ruff"
+        "charliermarsh.ruff",
+        "astral-sh.ty",
+        "anthropic.claude-code"
       ],
       "settings": {
         "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",

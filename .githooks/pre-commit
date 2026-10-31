@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# コミット前に、ステージした Python ファイルだけを ruff（lint・書式）と ty（型）で確かめる。
+# 普段の編集中は VS Code の波線で気づける前提で、ここでは見落としを止めるだけにする。
+# 未実装の部品のテストなど、触っていないファイルの指摘でコミットが止まらないよう、全体ではなくステージ分だけを見る。
+# 一時的に飛ばすときは git commit --no-verify。
+set -euo pipefail
+
+mapfile -t files < <(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+if [ ${#files[@]} -eq 0 ]; then
+    exit 0
+fi
+
+status=0
+uv run --quiet ruff check "${files[@]}" || status=1
+uv run --quiet ruff format --check "${files[@]}" || status=1
+uv run --quiet ty check "${files[@]}" || status=1
+
+if [ $status -ne 0 ]; then
+    echo
+    echo "pre-commit: 上の指摘を直してからコミットしてください（書式は uv run ruff format src tests で直る）"
+fi
+exit $status
