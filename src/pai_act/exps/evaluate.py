@@ -46,6 +46,9 @@ SUCCESS_REWARD = 4
 REWARD_LABELS = ["none", "touched", "lifted", "transfer attempted", "success"]
 # 失敗したエピソードの型。最大報酬 r の次の段階 r+1 に進めなかった、という意味で名付ける
 FAILURE_TYPES = ["no_touch", "not_lifted", "not_transferred", "transfer_failed"]
+# diffusion / flow_matching の推論の設定。評価時に上書きでき、results.json に実際に使った値を残す
+# （ポリシーが持っているものだけ。diffusion は sampler / x0_clip、flow_matching は solver を持つ）
+SAMPLER_OPTIONS = ("sampler", "solver", "num_inference_steps", "x0_clip", "ddim_eta")
 
 
 @torch.no_grad()
@@ -177,19 +180,21 @@ def evaluate(policy: Policy, cfg: EvalConfig, task: str, out_dir: Path) -> dict:
             "calls": len(timings),
         },
     }
-    # diffusion は同じチェックポイントをサンプラーを変えて評価するので、実際に使った設定を残す
-    if hasattr(policy, "sampler"):
-        summary["sampler"] = {
-            name: getattr(policy, name) for name in ("sampler", "num_inference_steps")
-        }
+    # diffusion / flow_matching は同じチェックポイントをサンプラーを変えて評価するので、実際に使った設定を残す
+    sampler = {name: getattr(policy, name) for name in SAMPLER_OPTIONS if hasattr(policy, name)}
+    if sampler:
+        summary["sampler"] = sampler
     results = {"config": {k: str(v) for k, v in vars(cfg).items()}, **summary, "episodes": episodes}
     (out_dir / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False))
     return summary
 
 
 def apply_sampler_overrides(policy: Policy, cfg: EvalConfig) -> None:
-    """評価の引数でサンプラー・推論ステップ数を上書きする（diffusion のみ。学習し直さずに比べるため）。"""
-    for name in ("sampler", "num_inference_steps"):
+    """評価の引数でサンプラー・ODE ソルバー・推論ステップ数・x̂_0 のクリップの値を上書きする。
+
+    diffusion / flow_matching のみ。学習し直さずに比べるため。
+    """
+    for name in SAMPLER_OPTIONS:
         value = getattr(cfg, name)
         if value is None:
             continue
@@ -211,6 +216,26 @@ def main() -> None:
         # DDPM は常に T ステップ全部を辿るので、推論ステップ数の代わりに T を付ける
         steps_attr = "num_diffusion_steps" if sampler == "ddpm" else "num_inference_steps"
         tag = f"_{sampler}{getattr(policy, steps_attr)}"
+        # クリップの値を上書きしたときだけ付ける（例: eval_ckpt_last_ddim10_clip0 はクリップしない場合）
+        if cfg.x0_clip is not None:
+            tag += f"_clip{cfg.x0_clip:g}"
+        # η も上書きしたときだけ付ける（例: eval_ckpt_last_ddim100_eta1）。DDPM には効かないので付けない
+        if cfg.ddim_eta is not None and sampler == "ddim":
+            tag += f"_eta{cfg.ddim_eta:g}"
+    elif hasattr(policy, "solver"):
+        # flow_matching も同じ理由で分ける（例: eval_ckpt_last_euler10、eval_ckpt_last_heun5）
+        tag = f"_{policy.solver}{policy.num_inference_steps}"
+    # temporal ensembling なしの評価は、ありの評価（既定）の結果を上書きしないよう出力先を分ける。
+    # 末尾の数字は何ステップごとに推論したか（例: eval_ckpt_last_noens100、eval_ckpt_last_ddim10_noens50）
+    if not cfg.temporal_ensemble:
+        tag += f"_noens{cfg.query_every or policy.chunk_size}"
+    # ensembling の重みの係数 m を既定から変えたときも分ける（例: eval_ckpt_last_coef0.1）
+    elif cfg.ensemble_coef != EvalConfig.ensemble_coef:
+        tag += f"_coef{cfg.ensemble_coef:g}"
+    # 評価のシードの範囲を既定（シード 0 から 50 本）から変えたときも分ける
+    # （例: eval_ckpt_last_s50n150 はシード 50〜199。既定の 50 本と合わせて 200 本として集計する）
+    if cfg.seed != EvalConfig.seed or cfg.num_episodes != EvalConfig.num_episodes:
+        tag += f"_s{cfg.seed}n{cfg.num_episodes}"
     out_dir = cfg.out_dir or cfg.ckpt.parent / f"eval_{cfg.ckpt.stem}{tag}"
     torch.backends.cudnn.benchmark = True
 

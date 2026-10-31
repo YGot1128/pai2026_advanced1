@@ -55,6 +55,8 @@ def build_policy(cfg: TrainConfig, pretrained_backbone: bool = True) -> Policy:
             num_diffusion_steps=cfg.num_diffusion_steps,
             sampler=cfg.sampler,
             num_inference_steps=cfg.num_inference_steps,
+            x0_clip=cfg.x0_clip,
+            ddim_eta=cfg.ddim_eta,
             pretrained_backbone=pretrained_backbone,
         )
     raise ValueError(f"unknown policy: {cfg.policy}")

@@ -33,16 +33,17 @@ class TrainConfig:
     # --- モデル ---
     chunk_size: int = arg(100, "行動チャンクの長さ k（1回の推論で何ステップ先まで出すか）")
     hidden_dim: int = arg(512, "baseline: MLP の中間層の幅")
-    d_model: int = arg(512, "act / diffusion: Transformer のトークンの次元数")
-    num_heads: int = arg(8, "act / diffusion: attention の head 数")
-    dim_feedforward: int = arg(3200, "act / diffusion: FFN の中間層の幅")
-    num_encoder_layers: int = arg(4, "act / diffusion: 観測側の Encoder の層数")
+    d_model: int = arg(512, "act / diffusion / flow_matching: Transformer のトークンの次元数")
+    num_heads: int = arg(8, "act / diffusion / flow_matching: attention の head 数")
+    dim_feedforward: int = arg(3200, "act / diffusion / flow_matching: FFN の中間層の幅")
+    num_encoder_layers: int = arg(4, "act / diffusion / flow_matching: 観測側の Encoder の層数")
     num_decoder_layers: int = arg(
-        1, "act / diffusion: Decoder の層数（ACT 公式実装は実質1層。policies/act.py 参照）"
+        1,
+        "act / diffusion / flow_matching: Decoder の層数（ACT 公式実装は実質1層。policies/act.py 参照）",
     )
     num_vae_encoder_layers: int = arg(4, "act: CVAE エンコーダの層数")
     latent_dim: int = arg(32, "act: 潜在変数 z の次元数")
-    dropout: float = arg(0.1, "act / diffusion: dropout の確率")
+    dropout: float = arg(0.1, "act / diffusion / flow_matching: dropout の確率")
     kl_weight: float = arg(10.0, "act: 損失の KL 項の重み β")
     learned_query_pos: bool = arg(
         True,
@@ -54,7 +55,23 @@ class TrainConfig:
         "ddim", "diffusion: 推論のサンプラー（ddpm / ddim）。評価時に --sampler で上書きできる"
     )
     num_inference_steps: int = arg(
-        10, "diffusion: DDIM の推論ステップ数 S（T の約数）。評価時に上書きできる"
+        10,
+        "diffusion: DDIM の推論ステップ数 S（T の約数）/ flow_matching: ODE を解くステップ数 N"
+        "（heun はデノイザを 2N 回呼ぶ）。評価時に上書きできる",
+    )
+    solver: str = arg(
+        "euler",
+        "flow_matching: 推論の ODE ソルバー（euler / heun）。評価時に --solver で上書きできる",
+    )
+    x0_clip: float = arg(
+        6.0,
+        "diffusion: サンプリング中の x̂_0 を [-この値, この値] にクリップする"
+        "（正規化後の単位。0 でクリップしない）。"
+        "評価時に上書きできる",
+    )
+    ddim_eta: float = arg(
+        0.0,
+        "diffusion: DDIM で毎ステップ足す乱数の大きさ η（0〜1。0 で決定的）。評価時に上書きできる",
     )
 
     # --- 最適化 ---
@@ -120,7 +137,20 @@ class EvalConfig:
         None, "diffusion: サンプラーを上書きする（ddpm / ddim。省略時は学習時の設定）"
     )
     num_inference_steps: int | None = arg(
-        None, "diffusion: DDIM の推論ステップ数を上書きする（省略時は学習時の設定）"
+        None,
+        "diffusion / flow_matching: 推論ステップ数を上書きする（省略時は学習時の設定。"
+        "diffusion は DDIM のみに効く）",
+    )
+    solver: str | None = arg(
+        None, "flow_matching: ODE ソルバーを上書きする（euler / heun。省略時は学習時の設定）"
+    )
+    x0_clip: float | None = arg(
+        None,
+        "diffusion: x̂_0 のクリップの値を上書きする（0 でクリップしない。省略時は学習時の設定）",
+    )
+    ddim_eta: float | None = arg(
+        None,
+        "diffusion: DDIM の η を上書きする（0〜1。省略時は学習時の設定。DDIM のみに効く）",
     )
     out_dir: Path | None = arg(None, "出力先（省略時は <ckptのフォルダ>/eval_<ckpt名>/）")
 

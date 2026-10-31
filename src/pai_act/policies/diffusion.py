@@ -43,11 +43,60 @@
         x_{t'} = √ᾱ_{t'} · x̂_0 + √(1 - ᾱ_{t'}) · ε̂     （t' = t - T/S。最後は t' < 0 で ᾱ_{t'} = 1 とする）
     乱数を足さないので決定的: x_T を決めれば結果が決まる（微分方程式を数値的に解いているのと同じ）。
 
+【推論 2': DDIM（η > 0）】 Song et al. 2021 式 (12)・(16)
+    η = 0 の更新に、毎ステップ乱数を足す項を加える。足した乱数の分だけ ε̂ の項を小さくして、
+    x_{t'} のノイズの分散を 1 - ᾱ_{t'} に保つ（学習時の x_{t'} と同じ大きさのノイズが乗った状態にする）:
+        σ = η · √((1 - ᾱ_{t'}) / (1 - ᾱ_t)) · √(1 - ᾱ_t / ᾱ_{t'})
+        x_{t'} = √ᾱ_{t'} · x̂_0 + √(1 - ᾱ_{t'} - σ²) · ε̂ + σ · z,   z ~ N(0, I)
+    η = 0 なら σ = 0 で【推論 2】に戻る。η = 1 かつ S = T（t' = t - 1）なら σ² = β̃_t になり、
+    x̂_0 がクリップされない限り DDPM（【推論 1】）と同じ更新になる。0 < η < 1 はその中間。
+    最後のステップ（ᾱ_{t'} = 1）では σ = 0 なので、乱数は足されない。
+    η は 0〜1 で使う（η > 1 では 1 - ᾱ_{t'} - σ² が負になりうる）。
+
+【x̂_0 のクリップ】 Diffusion Policy（Chi et al. 2023）が使う diffusers の clip_sample=True と同じ考え方
+    ε̂ の誤差を e（ε̂ = ε + e）とすると、x̂_0 = x_0 - √(1 - ᾱ_t) / √ᾱ_t · e となり、誤差が
+    √(1 - ᾱ_t) / √ᾱ_t 倍されて x̂_0 に乗る。cosine スケジュールでは ᾱ_{T-1} ≈ 2.4e-7 なので、
+    最初のステップ（t = T-1）ではこの倍率が約 2000 になる。300 ステップの試走のモデル（ε̂ の誤差 0.28）では
+    x̂_0 が正規化後の単位で約 570 にずれ、シミュレータが発散した（DIFFUSION_IMPLEMENTATION.md の D7b）。
+    そこで各ステップの x̂_0 を [-x0_clip, x0_clip] にクリップしてから次の x を作る
+    （クリップ: 範囲からはみ出た要素を端の値に置き換え、範囲内の要素はそのまま残す）。
+    学習データの行動は正規化後の単位で最大 5.2 なので、既定の x0_clip = 6 では正しい x̂_0 の値はほとんど変わらない。
+    DDPM でもクリップできるように、平均 μ を x̂_0 を使う形（Ho et al. 2020 式 (7) の事後分布の平均）で書く:
+        μ = √ᾱ_{t-1} · β_t / (1 - ᾱ_t) · x̂_0 + √α_t · (1 - ᾱ_{t-1}) / (1 - ᾱ_t) · x_t     （ᾱ_{-1} = 1）
+    クリップしなければ、x̂_0 を代入して整理すると【推論 1】の平均の式と一致する。
+
 ノイズスケジュール（Nichol & Dhariwal 2021 "Improved DDPM" Sec. 3.2 の cosine スケジュール）:
     f(u) = cos²((u + s) / (1 + s) · π/2),  s = 0.008
     β_t = min(1 - f((t+1)/T) / f(t/T), 0.999)
     ᾱ_t が 1 から 0 までなめらかに減る。T = 100 のような少ないステップ数でも、
     最後にはほぼ純粋なノイズになる（DDPM 原著の線形スケジュールは T = 1000 用）。
+
+    u = t/T は時刻を 0〜1 に直したもの。f(u) は「時刻 u で x_0 の成分がどれだけ残っているか」を表す。
+    s は t = 0 付近で β が小さくなりすぎないためのずらし（s = 0 だと β_0 = 2.5e-4。s = 0.008 では 6.3e-4）。
+
+    ᾱ_t は f の比で直接書ける。1 - β_t = f((t+1)/T) / f(t/T) を掛け合わせると、途中が打ち消し合う:
+        ᾱ_t = (1 - β_0) · (1 - β_1) · ... · (1 - β_t)
+            = f(1/T)/f(0) · f(2/T)/f(1/T) · ... · f((t+1)/T)/f(t/T)    … 1 - β の式を代入
+            = f((t+1)/T) / f(0)                                         … 隣どうしの分子と分母が消える
+    これは β が上限 0.999 に当たらない t で成り立つ。T = 100 で上限に当たるのは t = 99 の1個だけ:
+        f(1) = cos²((1 + s) / (1 + s) · π/2) = cos²(π/2) = 0             … u = 1 を代入
+        β_99 = min(1 - 0 / f(0.99), 0.999) = min(1, 0.999) = 0.999       … 上限がないと β = 1、ᾱ_99 = 0 になる
+        ᾱ_99 = ᾱ_98 · (1 - β_99) = 2.43e-4 × 0.001 = 2.43e-7             … 0 にならず、小さな値が残る
+
+    よく使う値（T = 100。cosine_beta_schedule(100) から計算）:
+        t  | β_t      | ᾱ_t      | √ᾱ_t    | √(1 - ᾱ_t) | √(1 - ᾱ_t) / √ᾱ_t
+        0  | 0.00063  | 0.9994   | 0.9997  | 0.0251     | 0.0251
+        1  | 0.0011   | 0.9983   | 0.9991  | 0.0418     | 0.0418
+        9  | 0.0050   | 0.972    | 0.986   | 0.167      | 0.169
+        49 | 0.0306   | 0.494    | 0.703   | 0.711      | 1.01
+        50 | 0.0315   | 0.478    | 0.692   | 0.722      | 1.04
+        59 | 0.0418   | 0.341    | 0.584   | 0.812      | 1.39
+        89 | 0.172    | 0.0241   | 0.155   | 0.988      | 6.37
+        98 | 0.750    | 2.43e-4  | 0.0156  | 1.000      | 64.2
+        99 | 0.999    | 2.43e-7  | 4.9e-4  | 1.000      | 2029
+    √ᾱ_t は x_t の中の x_0 の係数、√(1 - ᾱ_t) はノイズの係数。最後の列は、x̂_0 を求めるときに
+    ε̂ の誤差が何倍されるか（【x̂_0 のクリップ】）。t = 99 で約 2000 倍になる。
+    DDIM 10 は t = 99, 89, ..., 9 を、DDIM 100 と DDPM は t = 99, 98, ..., 0 を辿る。
 
 ハイパーパラメータの既定値は Diffusion Policy（Chi et al. 2023）に合わせる:
     T 100 / cosine スケジュール / ε を予測 / DDIM の推論 10 ステップ
@@ -96,6 +145,11 @@ class DiffusionPolicy(DenoiserPolicy):
         num_diffusion_steps: 拡散のステップ数 T。
         sampler: predict_chunk で使うサンプラー（"ddpm" / "ddim"）。評価時に上書きできる。
         num_inference_steps: DDIM で辿るステップ数 S（T の約数）。評価時に上書きできる。
+        x0_clip: サンプリング中の x̂_0 を [-x0_clip, x0_clip] にクリップする
+            （正規化後の単位。0 でクリップしない）。
+            評価時に上書きできる。
+        ddim_eta: DDIM で毎ステップ足す乱数の大きさ η（0〜1。0 で決定的、1 かつ S = T で DDPM と同じ）。
+            評価時に上書きできる。
     """
 
     # register_buffer で作る属性は、型チェッカーに Tensor だと伝えるために宣言しておく
@@ -115,6 +169,8 @@ class DiffusionPolicy(DenoiserPolicy):
         num_diffusion_steps: int = 100,
         sampler: str = "ddim",
         num_inference_steps: int = 10,
+        x0_clip: float = 6.0,
+        ddim_eta: float = 0.0,
         pretrained_backbone: bool = True,
     ):
         super().__init__(
@@ -130,6 +186,8 @@ class DiffusionPolicy(DenoiserPolicy):
         self.num_diffusion_steps = num_diffusion_steps
         self.sampler = sampler
         self.num_inference_steps = num_inference_steps
+        self.x0_clip = x0_clip
+        self.ddim_eta = ddim_eta
 
         # Step 1: betas = cosine_beta_schedule(num_diffusion_steps)、alphas = 1 - betas、
         #         alphas_cumprod = alphas の累積積（torch.cumprod）を作る。いずれも (T,)
@@ -173,8 +231,8 @@ class DiffusionPolicy(DenoiserPolicy):
         image = batch["image"]  # (B, 3, H, W) uint8
 
         # Step 2: self._encode_obs で memory と memory_pos を作る
-        # shapeのLは、画像のパッチ数 + 1（cls token）で、k ではないことに注意
-        memory, memory_pos = self._encode_obs(image, state_norm)  # (B, L, d_model), (B, L, d_model)
+        # shapeのLは、画像トークンの数 h*w + 1（関節角のトークン）で、k ではないことに注意
+        memory, memory_pos = self._encode_obs(image, state_norm)  # (B, L, d_model), (1, L, d_model)
 
         # Step 3: t をバッチ内のサンプルごとに {0, ..., T-1} から一様ランダムに選ぶ:
         #         torch.randint → (B,)
@@ -188,7 +246,7 @@ class DiffusionPolicy(DenoiserPolicy):
         noise = torch.randn_like(action_norm, device=action_norm.device)  # (B, k, 14)
 
         # Step 4: self.q_sample で x_t を作り、self._denoise で ε を予測する
-        x_t = self.q_sample(action_norm, t, noise)
+        x_t = self.q_sample(action_norm, t, noise)  # (B, k, 14)
         epsilon_hat = self._denoise(x_t, t, memory, memory_pos)  # (B, k, 14)
 
         # Step 5: 埋め草を除いた MSE: ステップごとに 14 次元の平均を取り (B, k)、
@@ -222,20 +280,42 @@ class DiffusionPolicy(DenoiserPolicy):
             t_batch = torch.full((batch_size,), t, dtype=torch.long, device=x.device)  # (B,)
             epsilon_hat = self._denoise(x, t_batch, memory, memory_pos)  # (B, k, 14)
 
-            # Step 3: モジュール docstring の式で平均を作る: 1/√α_t · (x_t - β_t / √(1 - ᾱ_t) · ε̂)
+            # Step 3（D7b で書き換える）: x̂_0 をクリップできるように、平均を x̂_0 を使う形にする
+            #   3a: x̂_0 = (x_t - √(1 - ᾱ_t) · ε̂) / √ᾱ_t を求める（DDIM の Step 2b と同じ式）
+            x_hat_0 = (x - torch.sqrt(1 - self.alphas_cumprod[t]) * epsilon_hat) / torch.sqrt(
+                self.alphas_cumprod[t]
+            )  # (B, k, 14)
+
+            #   3b: self.x0_clip > 0 なら x̂_0 を [-x0_clip, x0_clip] にクリップする（torch.clamp）
+            if self.x0_clip > 0:
+                x_hat_0 = torch.clamp(x_hat_0, min=-self.x0_clip, max=self.x0_clip)
+
+            #   3c: ᾱ_{t-1} を取り出す。t = 0 なら 1 にする（DDIM の Step 2c と同じ扱い）
+            if t > 0:
+                alphas_cumprod_prev = self.alphas_cumprod[t - 1]
+            else:
+                alphas_cumprod_prev = self.alphas_cumprod.new_tensor(1.0)
+
+            #   3d: 平均 μ = √ᾱ_{t-1} · β_t / (1 - ᾱ_t) · x̂_0 + √α_t · (1 - ᾱ_{t-1}) / (1 - ᾱ_t) · x_t
+            #       t = 0 では x̂_0 の係数が 1、x_t の係数が 0 になり、μ = x̂_0（クリップした値）そのものになる
             mean = (
-                1
-                / torch.sqrt(self.alphas[t])
-                * (x - self.betas[t] / torch.sqrt(1 - self.alphas_cumprod[t]) * epsilon_hat)
-            )
+                torch.sqrt(alphas_cumprod_prev)
+                * self.betas[t]
+                / (1 - self.alphas_cumprod[t])
+                * x_hat_0
+                + torch.sqrt(self.alphas[t])
+                * (1 - alphas_cumprod_prev)
+                / (1 - self.alphas_cumprod[t])
+                * x
+            )  # (B, k, 14)
 
             # Step 4: t > 0 なら σ_t · z を足す（σ_t² = β̃_t、z は torch.randn_like）。t = 0 なら平均をそのまま使う
             if t > 0:
                 beta_tilde = (
-                    (1 - self.alphas_cumprod[t - 1]) / (1 - self.alphas_cumprod[t]) * self.betas[t]
+                    (1 - alphas_cumprod_prev) / (1 - self.alphas_cumprod[t]) * self.betas[t]
                 )
                 sigma = torch.sqrt(beta_tilde)
-                z = torch.randn_like(x)
+                z = torch.randn_like(x)  # (B, k, 14)
                 x = mean + sigma * z
             else:
                 x = mean
@@ -245,7 +325,9 @@ class DiffusionPolicy(DenoiserPolicy):
     def _sample_ddim(
         self, x: torch.Tensor, memory: torch.Tensor, memory_pos: torch.Tensor, num_steps: int
     ) -> torch.Tensor:
-        """DDIM（η = 0）: T ステップのうち num_steps 個を辿って x_0 を作る。乱数は使わない。
+        """DDIM: T ステップのうち num_steps 個を辿って x_0 を作る。
+
+        self.ddim_eta = 0 なら乱数を使わない（決定的）。η > 0 なら毎ステップ σ · z を足す（D11）。
 
         Args:
             x: (B, k, 14) 出発点 x_T ~ N(0, I)。
@@ -271,7 +353,12 @@ class DiffusionPolicy(DenoiserPolicy):
             # Step 2b: モジュール docstring の式で x̂_0 を推定する: (x_t - √(1 - ᾱ_t) · ε̂) / √ᾱ_t
             x_hat_0 = (x - torch.sqrt(1 - self.alphas_cumprod[t]) * epsilon_hat) / torch.sqrt(
                 self.alphas_cumprod[t]
-            )
+            )  # (B, k, 14)
+            # Step 2b'（D7b で追加）: self.x0_clip > 0 なら x̂_0 を [-x0_clip, x0_clip] にクリップする
+            #          （torch.clamp）。ε̂ はクリップした x̂_0 から計算し直さず、2d でそのまま使う
+            #          （diffusers の DDIM と同じ扱い）
+            if self.x0_clip > 0:
+                x_hat_0 = torch.clamp(x_hat_0, min=-self.x0_clip, max=self.x0_clip)
 
             # Step 2c: t' = t - 刻み幅 の ᾱ_{t'} を取り出す。t' >= 0 なら self.alphas_cumprod[t']、
             #          t' < 0（最後のステップ）なら 1 にする（if で分ける。t は Python の int）
@@ -285,7 +372,22 @@ class DiffusionPolicy(DenoiserPolicy):
                 alpha_prime = self.alphas_cumprod.new_tensor(1.0)
 
             # Step 2d: モジュール docstring の式で x_{t'} を作る: √ᾱ_{t'} · x̂_0 + √(1 - ᾱ_{t'}) · ε̂
-            x = torch.sqrt(alpha_prime) * x_hat_0 + torch.sqrt(1 - alpha_prime) * epsilon_hat
+            #   （D11 で書き換える）【推論 2'】の式にして η > 0 に対応させる。η = 0 では今と同じ値になる:
+            #   2d-1: σ = η · √((1 - ᾱ_{t'}) / (1 - ᾱ_t)) · √(1 - ᾱ_t / ᾱ_{t'}) を求める（η は self.ddim_eta）。
+            #         最後のステップ（ᾱ_{t'} = 1）では σ = 0 になる
+            sigma = (
+                self.ddim_eta
+                * torch.sqrt((1 - alpha_prime) / (1 - self.alphas_cumprod[t]))
+                * torch.sqrt(1 - self.alphas_cumprod[t] / alpha_prime)
+            )  # スカラ値
+
+            #   2d-2: x_{t'} = √ᾱ_{t'} · x̂_0 + √(1 - ᾱ_{t'} - σ²) · ε̂ + σ · z（z は torch.randn_like）。
+            #         ε̂ の係数が √(1 - ᾱ_{t'}) から √(1 - ᾱ_{t'} - σ²) に変わる（足す乱数の分だけ小さくする）
+            x = (
+                torch.sqrt(alpha_prime) * x_hat_0
+                + torch.sqrt(1 - alpha_prime - sigma**2) * epsilon_hat
+                + sigma * torch.randn_like(x, dtype=x.dtype, device=x.device)
+            )  # (B, k, 14)
 
         # Step 3: ループを抜けた x を返す。最後のステップ（t' < 0）で ᾱ_{t'} = 1 としたので、
         #         x は x̂_0 そのものになっている。デノイザを呼ぶのはループの中の S 回だけ
@@ -296,15 +398,17 @@ class DiffusionPolicy(DenoiserPolicy):
         # Step 1: 関節角を正規化し、self._encode_obs で memory を作る（サンプリングの前に1回だけ）
         state = obs["state"]  # (B, 14)
         state_norm = self.state_norm.normalize(state)  # (B, 14)
-        image = obs["image"]
+        image = obs["image"]  # (B, 3, H, W) uint8
 
-        # shapeのLは、画像のパッチ数 + 1（cls token）で、k ではないことに注意
-        memory, memory_pos = self._encode_obs(image, state_norm)  # (B, L, d_model), (B, L, d_model)
+        # shapeのLは、画像トークンの数 h*w + 1（関節角のトークン）で、k ではないことに注意
+        memory, memory_pos = self._encode_obs(image, state_norm)  # (B, L, d_model), (1, L, d_model)
 
         # Step 2: 出発点 x_T ~ N(0, I) を (B, k, 14) の乱数として生成する
         #         （torch.randn。device は memory に合わせる）
         batch_size = state.shape[0]
-        x = torch.randn((batch_size, self.chunk_size, ACTION_DIM), device=memory.device)
+        x = torch.randn(
+            (batch_size, self.chunk_size, ACTION_DIM), device=memory.device
+        )  # (B, k, 14)
 
         # Step 3: self.sampler が "ddpm" なら _sample_ddpm、"ddim" なら _sample_ddim
         #         （ステップ数は self.num_inference_steps）、それ以外は ValueError

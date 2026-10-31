@@ -329,15 +329,182 @@ def test_ddim_predict_chunk_sampler_switch(monkeypatch):
         policy.predict_chunk(batch)
 
 
+# ---- D7b: x̂_0 のクリップ ----
+
+
+def zero_denoiser(inputs: list[torch.Tensor] | None = None):
+    """常に ε̂ = 0 を返す、でたらめなデノイザ。呼ばれたときの x_t を inputs に記録する。
+
+    最初のステップ（t = T-1）で x̂_0 = x_T / √ᾱ_{T-1} ≈ 2000 · x_T となり、クリップしなければ出力が発散する。
+    乱数を使わないので、サンプラーの乱数の使い方に影響しない。
+    """
+
+    def denoise(x_t, t, memory, memory_pos):
+        if inputs is not None:
+            inputs.append(x_t.clone())
+        return torch.zeros_like(x_t)
+
+    return denoise
+
+
+def run_sampler(policy: DiffusionPolicy, sampler: str, x_T: torch.Tensor) -> torch.Tensor:
+    if sampler == "ddpm":
+        return policy._sample_ddpm(x_T, NO_MEMORY, NO_MEMORY)
+    return policy._sample_ddim(x_T, NO_MEMORY, NO_MEMORY, 10)
+
+
+@pytest.mark.parametrize("sampler", ["ddpm", "ddim"])
+def test_clip_bounds_every_step(monkeypatch, sampler):
+    """デノイザがでたらめでも、x̂_0 を毎ステップクリップすれば、途中の x_t も出力も発散しない。
+
+    出力は最後のステップの x̂_0（をクリップしたもの）なので [-x0_clip, x0_clip] に収まる。
+    最後に1回だけクリップする実装では、途中の x_t が数百〜数千になるので、ここで見つかる。
+    x0_clip = 0 でクリップしないと発散することも確かめる。
+    """
+    torch.manual_seed(12)
+    x_T = torch.randn(2, K, 14)
+
+    policy = small_policy(x0_clip=3.0)
+    inputs: list[torch.Tensor] = []
+    monkeypatch.setattr(policy, "_denoise", zero_denoiser(inputs))
+    torch.manual_seed(13)
+    out = run_sampler(policy, sampler, x_T.clone())
+    assert out.abs().max() <= 3.0 * (1 + 1e-3), "出力が [-x0_clip, x0_clip] に収まっていない"
+    for i, x_t in enumerate(inputs[1:], start=1):
+        assert x_t.abs().max() < 10.0, f"{i + 1} 回目のデノイザの入力 x_t が発散している"
+
+    policy.x0_clip = 0.0
+    torch.manual_seed(13)
+    out = run_sampler(policy, sampler, x_T.clone())
+    assert out.abs().max() > 100.0, "x0_clip = 0 ではクリップしない（ε̂ の誤差が約 2000 倍される）"
+
+
+def test_clip_off_ddpm_matches_eps_form(monkeypatch):
+    """クリップしなければ、x̂_0 を使う形の DDPM の平均は、ε̂ を直接使う式と同じ値になる。
+
+    float64 で、乱数を使わない（x_t から決まる）デノイザを使い、同じ乱数の状態から両方の式で辿って比べる。
+    x̂_0 の係数・x_t の係数・t = 0 での ᾱ_{-1} = 1 の扱いを誤ると一致しない。
+    """
+    policy = small_policy(x0_clip=0.0).double()
+    # バッファは float32 で作った値なので、.double() だけでは ᾱ_t = α_t · ᾱ_{t-1} が 5e-8 の精度でしか
+    # 成り立たない。2つの式が一致するのはこの恒等式のおかげで、ずれは 1/(1 - ᾱ_t) 倍される
+    # （t = 0 で約 1600 倍）。そのため最後のほうのステップで相対 1e-5 ほどずれて比べられない。float64 で作り直す
+    betas = cosine_beta_schedule(T).double()
+    policy.betas.copy_(betas)
+    policy.alphas.copy_(1 - betas)
+    policy.alphas_cumprod.copy_(torch.cumprod(1 - betas, dim=0))
+    monkeypatch.setattr(policy, "_denoise", lambda x_t, t, m, mp: 0.9 * torch.tanh(x_t))
+    torch.manual_seed(14)
+    x_T = torch.randn(2, K, 14, dtype=torch.float64)
+
+    torch.manual_seed(15)
+    out = policy._sample_ddpm(x_T.clone(), NO_MEMORY, NO_MEMORY)
+
+    torch.manual_seed(15)
+    x = x_T.clone()
+    b, a, ab = policy.betas, policy.alphas, policy.alphas_cumprod
+    for t in reversed(range(T)):
+        eps = 0.9 * torch.tanh(x)
+        x = (x - b[t] / (1 - ab[t]).sqrt() * eps) / a[t].sqrt()
+        if t > 0:
+            x = x + ((1 - ab[t - 1]) / (1 - ab[t]) * b[t]).sqrt() * torch.randn_like(x)
+    assert torch.allclose(out, x, rtol=1e-6, atol=1e-8)
+
+
+# ---- D11: DDIM に乱数を足す（η > 0） ----
+
+
+def test_ddim_eta1_full_steps_matches_ddpm(monkeypatch):
+    """η = 1 かつ S = T の DDIM は、DDPM と同じ更新になる（σ² = β̃_t になり、平均も一致する）。
+
+    乱数の状態を揃えて両方を回し、途中の全ステップの x_t が一致するかを見る。
+    理想のデノイザでは x̂_0 = c なので、クリップは効かない（c は ±6 に収まる）。
+    σ の式の誤り（η を掛け忘れる・2乗と平方根を取り違える・ᾱ_t / ᾱ_{t'} を逆にする）や、
+    ε̂ の係数を √(1 - ᾱ_{t'}) のままにした誤りは、ここで見つかる。
+    """
+    policy = small_policy(ddim_eta=1.0)
+    torch.manual_seed(12)
+    c_n = torch.randn(2, K, 14)
+    x_T = torch.randn(2, K, 14)
+    ddpm_inputs: dict[int, torch.Tensor] = {}
+    ddim_inputs: dict[int, torch.Tensor] = {}
+    monkeypatch.setattr(policy, "_denoise", oracle_denoiser(policy, c_n, inputs=ddpm_inputs))
+    torch.manual_seed(13)
+    policy._sample_ddpm(x_T.clone(), NO_MEMORY, NO_MEMORY)
+    monkeypatch.setattr(policy, "_denoise", oracle_denoiser(policy, c_n, inputs=ddim_inputs))
+    torch.manual_seed(13)
+    policy._sample_ddim(x_T.clone(), NO_MEMORY, NO_MEMORY, T)
+    assert sorted(ddim_inputs) == sorted(ddpm_inputs)
+    for t, x_t in ddpm_inputs.items():
+        assert torch.allclose(ddim_inputs[t], x_t, atol=1e-4), f"t={t}"
+
+
+@pytest.mark.parametrize("eta", [0.5, 1.0])
+def test_ddim_eta_intermediate_distribution(monkeypatch, eta):
+    """理想のデノイザを使うと、η によらず途中の x_t は N(√ᾱ_t · c, (1 - ᾱ_t) I) に従い、
+    隣り合うステップの（標準化した）ノイズの相関は √(1 - ᾱ_{t'} - σ²) / √(1 - ᾱ_{t'}) になる。
+
+    η = 0 では相関が 1（同じノイズのまま。test_ddim_intermediate_keeps_noise）、η = 1 の最初のステップでは
+    約 0.003（ほぼ全部が新しい乱数に入れ替わる）。S < T でも σ の式が正しいかを、この相関で確かめる。
+    ε̂ の係数を小さくし忘れると標準偏差が 1 を超え、乱数を足し忘れると相関が 1 になる。
+    """
+    policy = small_policy(ddim_eta=eta)
+    torch.manual_seed(14)
+    c_n = torch.randn(400, K, 14)
+    inputs: dict[int, torch.Tensor] = {}
+    monkeypatch.setattr(policy, "_denoise", oracle_denoiser(policy, c_n, inputs=inputs))
+    policy._sample_ddim(torch.randn(400, K, 14), NO_MEMORY, NO_MEMORY, 10)
+    ab = policy.alphas_cumprod
+
+    def noise(t: int) -> torch.Tensor:
+        return (inputs[t] - ab[t].sqrt() * c_n) / (1 - ab[t]).sqrt()
+
+    for t in range(T - 1, 9, -10):  # (t, t') = (99, 89), ..., (19, 9)
+        t_prime = t - 10
+        z, z_prime = noise(t), noise(t_prime)
+        assert abs(z_prime.mean().item()) < 0.05, f"t'={t_prime}: 平均 {z_prime.mean().item():.3f}"
+        assert abs(z_prime.std().item() - 1) < 0.05, f"t'={t_prime}: 標準偏差 {z_prime.std():.3f}"
+        sigma2 = eta**2 * (1 - ab[t_prime]) / (1 - ab[t]) * (1 - ab[t] / ab[t_prime])
+        expected = ((1 - ab[t_prime] - sigma2) / (1 - ab[t_prime])).sqrt().item()
+        corr = ((z - z.mean()) * (z_prime - z_prime.mean())).mean() / (z.std() * z_prime.std())
+        assert abs(corr.item() - expected) < 0.03, (
+            f"t={t} → t'={t_prime}: 相関 {corr.item():.3f}（期待値 {expected:.3f}）"
+        )
+
+
+def test_ddim_eta_recovers_x0(monkeypatch):
+    """η > 0 でも、理想のデノイザなら最後のステップ（ᾱ_{t'} = 1、σ = 0）で x_0 にたどり着く。"""
+    policy = small_policy(ddim_eta=1.0)
+    torch.manual_seed(15)
+    c_n = torch.randn(2, K, 14)
+    calls: list[int] = []
+    monkeypatch.setattr(policy, "_denoise", oracle_denoiser(policy, c_n, calls))
+    x = policy._sample_ddim(torch.randn(2, K, 14), NO_MEMORY, NO_MEMORY, 10)
+    assert calls == list(range(99, -1, -10))
+    assert torch.allclose(x, c_n, atol=1e-3)
+
+
+def test_ddim_eta_is_stochastic():
+    """η > 0 の DDIM は途中で乱数を足すので、出発点 x_T が同じでも、乱数が違えば結果が変わる。"""
+    policy = small_policy(ddim_eta=0.5)
+    memory, memory_pos = policy._encode_obs(fake_batch()["image"], torch.randn(2, 14))
+    x_T = torch.randn(2, K, 14)
+    torch.manual_seed(10)
+    a = policy._sample_ddim(x_T.clone(), memory, memory_pos, 10)
+    torch.manual_seed(11)
+    b = policy._sample_ddim(x_T.clone(), memory, memory_pos, 10)
+    assert not torch.allclose(a, b)
+
+
 # ---- 配線（config・build_policy・チェックポイント・評価の上書き） ----
 
 
 def test_build_policy_and_checkpoint_roundtrip(tmp_path):
     """設定から DiffusionPolicy を作れ、保存して読み直したモデルが同じ予測を返す。"""
-    cfg = TrainConfig(policy="diffusion", chunk_size=K, num_inference_steps=5, **SMALL)
+    cfg = TrainConfig(policy="diffusion", chunk_size=K, num_inference_steps=5, x0_clip=4.0, **SMALL)
     policy = build_policy(cfg, pretrained_backbone=False).eval()
     assert isinstance(policy, DiffusionPolicy)
-    assert (policy.sampler, policy.num_inference_steps) == ("ddim", 5)
+    assert (policy.sampler, policy.num_inference_steps, policy.x0_clip) == ("ddim", 5, 4.0)
     policy.action_norm.fit(torch.randn(100, 14) * 3 + 1)
     save_checkpoint(tmp_path / "ckpt.pt", policy, cfg, step=1)
     restored, _ = load_checkpoint(tmp_path / "ckpt.pt")
@@ -347,6 +514,13 @@ def test_build_policy_and_checkpoint_roundtrip(tmp_path):
     torch.manual_seed(0)
     b = restored.predict_chunk(batch)
     assert torch.allclose(a, b, atol=1e-5)
+
+
+def test_build_policy_ddim_eta():
+    """設定の ddim_eta がポリシーに渡る。既定は 0（η を足す前の DDIM と同じ）。"""
+    cfg = TrainConfig(policy="diffusion", chunk_size=K, ddim_eta=0.5, **SMALL)
+    assert build_policy(cfg, pretrained_backbone=False).ddim_eta == 0.5
+    assert TrainConfig.ddim_eta == 0.0
 
 
 def test_eval_sampler_overrides():
@@ -359,6 +533,12 @@ def test_eval_sampler_overrides():
     assert (policy.sampler, policy.num_inference_steps) == ("ddpm", 10)  # 指定しない方はそのまま
     apply_sampler_overrides(policy, EvalConfig(ckpt=Path("x"), num_inference_steps=20))
     assert (policy.sampler, policy.num_inference_steps) == ("ddpm", 20)
+    assert policy.x0_clip == 6.0
+    apply_sampler_overrides(policy, EvalConfig(ckpt=Path("x"), x0_clip=0.0))
+    assert policy.x0_clip == 0.0  # 0 も「指定した」扱い（None だけが省略）
+    assert policy.ddim_eta == 0.0
+    apply_sampler_overrides(policy, EvalConfig(ckpt=Path("x"), ddim_eta=1.0))
+    assert policy.ddim_eta == 1.0
     with pytest.raises(ValueError):
         apply_sampler_overrides(
             BaselinePolicy(chunk_size=K, pretrained_backbone=False),
